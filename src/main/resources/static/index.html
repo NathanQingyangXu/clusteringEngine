@@ -1,0 +1,184 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html>
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    <title>MongoGPT Search API Clustering Engine</title>
+    <link rel="stylesheet" type="text/css" href="ext-3.2.1/resources/css/ext-all.css"/>
+    <script type="text/javascript" src="ext-3.2.1/adapter/ext/ext-base.js"></script>
+    <script type="text/javascript" src="ext-3.2.1/ext-all.js"></script>
+    <script type="text/javascript">
+        Ext.onReady(function () {
+            let totalResults = [];
+
+            function submit() {
+                const statusLabel = Ext.getCmp('statusText');
+                statusLabel.setText('          calling MongoGPT Search API, please wait......');
+                clusterTree.setVisible(false);
+                resultPanel.body.update('');
+                let queryText = Ext.getCmp('queryText').getValue();
+                Ext.Ajax.request({
+                    url: 'clusters',
+                    timeout: 300000,
+                    method: 'post',
+                    params: {query: queryText},
+                    success: function (response) {
+                        var obj = Ext.decode(response.responseText);
+                        var searchTime = obj['searchTime'];
+                        var clusterTime = obj['clusterTime'];
+                        statusLabel.setText('          Search Time: ' + searchTime + 'ms; Cluster Time: ' + clusterTime + 'ms');
+                        totalResults = obj['docs'];
+                        var rootNode = buildClusterTree(obj['clusters']);
+                        clusterTree.setRootNode(rootNode);
+                        var docIndexes = [];
+                        for (var i = 0; i < totalResults.length; i++) {
+                            docIndexes.push(i);
+                        }
+                        var html = getHtml(docIndexes, queryText);
+                        resultPanel.body.update(html);
+                        clusterTree.setVisible(true);
+                    },
+                    failure: function (response) {
+                        statusLabel.setText('');
+                        var obj = Ext.decode(response.responseText);
+                        var message = obj['message'];
+                        Ext.MessageBox.alert('Error getting cluster result:' + message);
+                    }
+                });
+            }
+
+            var inputPanel = new Ext.Panel({
+                id: 'input',
+                region: 'north',
+                height: 60,
+                layout: 'hbox',
+                layoutConfig: {
+                    padding: '10',
+                    align: 'middle',
+                },
+                bodyStyle: "padding-left:500px",
+                defaults: {margins: '5 5 5 5'},
+
+                items: [{
+                    xtype: 'label',
+                    text: 'Please input your query: ',
+                }, {
+                    id: 'queryText',
+                    xtype: 'textfield',
+                    width: 300,
+                    listeners: {
+                        specialKey: function (f, e) {
+                            if (e.getKey() === e.ENTER) {
+                                submit();
+                            }
+                        }
+                    }
+                }, {
+                    xtype: 'button',
+                    text: 'Search',
+                    handler: function () {
+                        submit();
+                    }
+                }, {
+                    xtype: 'label',
+                    id: 'statusText'
+                }],
+            });
+
+            function buildClusterTree(clusters) {
+                var root = new Ext.tree.TreeNode;
+                for (var i = 0; i < clusters.length; i++) {
+                    var cluster = clusters[i];
+                    var childNode = buildCluster(cluster);
+                    root.appendChild(childNode);
+                }
+                return root;
+            }
+
+            function buildCluster(cluster) {
+                var node = new Ext.tree.TreeNode;
+                node.label = cluster['label'];
+                node.docs = cluster['docs'];
+                node.text = node.label + "(" + node.docs.length + ")";
+                var childClusters = cluster['children'];
+                if (childClusters) {
+                    for (var i = 0; i < childClusters.length; i++) {
+                        var childCluster = childClusters[i];
+                        var childNode = buildCluster(childCluster);
+                        node.appendChild(childNode);
+                    }
+                }
+                node.leaf = !node.hasChildNodes();
+                return node;
+            }
+
+            function underlineLabel(oldText, label) {
+                return oldText.replace(new RegExp(label, "gi"), "<font color='red' size='5'>" + label + "</font>");
+            }
+
+            function getHtml(docIndexes, label) {
+                var html = "<ul>";
+                var length = docIndexes.length;
+                for (var i = 0; i < length; i++) {
+                    var result = totalResults[docIndexes[i]];
+                    html += "<li>";
+                    html += "<p>No." + (docIndexes[i] + 1) + "</p>";
+                    html += "<h3><a href='" + result.url + "'>" + underlineLabel(result.title, label) + "</a></h3>";
+                    html += "<p>" + underlineLabel(result.snippet, label) + "</p>";
+                    html += "<font color='green' size='-1'>" + result.url + "</font><br><br>";
+                    html += "</li>";
+                }
+                html += "</ul>";
+                return html;
+            };
+
+            var clusterTree = new Ext.tree.TreePanel({
+                region: 'west',
+                split: true,
+                collapseMode: 'mini',
+                width: 400,
+                rootVisible: false,
+                useArrows: false,
+                collapsible: false,
+                autoScroll: true,
+                animate: true,
+                enableDD: true,
+                containerScroll: true,
+                border: false,
+                root: {
+                    nodeType: 'async',
+                    text: 'Result',
+                    draggable: false,
+                    id: 'root'
+                },
+                listeners: {
+                    click: function (n) {
+                        var label = n.label;
+                        if (label === 'Others') {
+                            label = n.parentNode.label;
+                        }
+                        var docs = n.docs;
+                        var html = getHtml(docs, label);
+                        resultPanel.body.update(html);
+                    }
+                },
+            });
+
+            var resultPanel = new Ext.Panel({
+                region: 'center',
+                collapseMode: 'mini',
+                autoScroll: true,
+            });
+
+            var viewport = new Ext.Viewport({
+                id: 'layout',
+                layout: 'border',
+                renderTo: Ext.getBody(),
+                items: [inputPanel, clusterTree, resultPanel]
+            });
+        });
+    </script>
+</head>
+<body>
+<div id='result'></div>
+</body>
+</html>
